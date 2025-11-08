@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auditron : Automated Balance Sheet Assurance</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+            min-height: 100vh;
+        }
+        .dark-bg {
+            background-color: #1a202c; /* Dark Gray/Blue from image */
+        }
+        .dashboard-card {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .alert-critical {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #f87171;
+        }
+        .gl-table-row:hover {
+            background-color: #f3f4f6;
+            cursor: pointer;
+        }
+        .btn-action {
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        .btn-action:hover {
+            transform: translateY(-1px);
+        }
+        /* Added for comment log scroll */
+        #commentHistory {
+            position: relative; /* Needed for sticky header */
+        }
+        .report-content {
+            white-space: pre-wrap;
+            text-align: left;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body class="p-0">
+
+    <!-- Main App Content Area -->
+    <main id="appContent" class="min-h-screen">
+        <!-- Login Page or Dashboard will be rendered here -->
+        <div class="text-center py-20 text-gray-500">
+            <i data-lucide="loader-2" class="w-12 h-12 animate-spin mx-auto text-indigo-400"></i>
+            <p class="mt-4">Loading Application...</p>
+        </div>
+    </main>
+
+    <!-- Modal for Document Upload/Review (Shared Component) -->
+    <div id="actionModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto p-6 transform transition-all scale-100 opacity-100">
+            <h2 id="modalTitle" class="text-2xl font-semibold mb-4 text-gray-800">GL Review Details</h2>
+            <p class="mb-4 text-gray-600">GL Account: <span id="modalGlCode" class="font-mono bg-gray-100 p-1 rounded"></span> - <span id="modalGlDesc" class="font-medium"></span></p>
+
+            <!-- GL Data Display -->
+            <div class="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-200 text-sm">
+                <p><strong>Balance:</strong> <span id="modalGlBalance"></span></p>
+                <p><strong>Priority:</strong> <span id="modalGlPriority" class="font-semibold"></span></p>
+                <p><strong>Status:</strong> <span id="modalGlStatus" class="font-semibold"></span></p>
+                <div id="modalFcAlert" class="mt-2 p-2 rounded text-xs font-medium alert-critical hidden"></div>
+            </div>
+
+            <!-- Document Info for Reviewers -->
+            <div id="reviewerDocInfo" class="space-y-2 hidden mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="text-sm font-semibold text-gray-700">Supporting Document</h3>
+                <p id="docInfoText" class="text-sm text-gray-600">Loading...</p>
+            </div>
+
+            <!-- Comment History Log -->
+            <div id="commentHistory" class="space-y-2 hidden mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 max-h-40 overflow-y-auto">
+                <h3 class="text-sm font-semibold text-gray-700 sticky top-0 bg-gray-50 pb-1 z-10">Comment History</h3>
+                <div id="commentLogList" class="text-sm space-y-2">
+                    <!-- Comments will be injected here by JS -->
+                </div>
+            </div>
+
+            <!-- Content based on Role -->
+            <div id="makerControls" class="space-y-4 hidden">
+                <h3 class="font-medium text-gray-700">Maker Action: Upload Supporting Documents</h3>
+                
+                <!-- Clarification Drafting Area (New Feature) -->
+                <div id="makerClarificationDraft" class="hidden space-y-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <h4 class="text-sm font-bold text-yellow-800 flex items-center">
+                        <i data-lucide="lightbulb" class="w-4 h-4 mr-2"></i> Draft your response for the Checker:
+                    </h4>
+                    <textarea id="makerClarificationText" rows="4" placeholder="Draft your detailed clarification and explanation here..." class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-sm"></textarea>
+                    <button onclick="draftMakerClarification(activeGlId)" class="w-full py-2 px-4 bg-purple-500 text-white rounded-lg font-semibold hover:bg-purple-600 btn-action flex items-center justify-center text-sm">
+                        ✨ Draft Clarification Note (AI Assist)
+                    </button>
+                    <p class="text-xs text-yellow-700">The drafted text will be placed above. Review and edit before submitting!</p>
+                </div>
+
+                <input type="file" id="supportingDoc" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
+                <label for="docBalance" class="block text-sm font-medium text-gray-700">Document/Working File Balance</label>
+                <input type="number" id="docBalance" placeholder="Enter supporting document total" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"/>
+                <button onclick="submitDocuments()" class="w-full py-2 px-4 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 btn-action">
+                    Submit for Checker Review
+                </button>
+            </div>
+
+            <div id="checkerControls" class="space-y-4 hidden">
+                <h3 class="font-medium text-gray-700">Checker Action: Validate & Review</h3>
+                <p id="checkerDocStatus" class="text-sm font-medium"></p>
+                <textarea id="checkerComment" rows="3" placeholder="Mandatory comment if Reject/Querying..." class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                <div class="flex space-x-3">
+                    <button onclick="approveGl('checker')" class="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 btn-action">
+                        <i data-lucide="check" class="w-5 h-5 inline mr-1"></i> Approve
+                    </button>
+                    <button onclick="rejectGl('checker')" class="flex-1 py-2 px-4 bg-yellow-600 text-white rounded-lg font-semibold hover:bg-yellow-700 btn-action">
+                        <i data-lucide="rotate-ccw" class="w-5 h-5 inline mr-1"></i> Reject/Query
+                    </button>
+                </div>
+            </div>
+
+            <div id="fcControls" class="space-y-4 hidden">
+                <h3 class="font-medium text-gray-700">FC Action: Final Sign-off</h3>
+                 <!-- <p id="fcCheckerLog" ...> (REMOVED) -->
+                <textarea id="fcComment" rows="3" placeholder="Optional comment before final approval/rejection..." class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                
+                <button onclick="generateExecutiveReport(activeGlId)" class="w-full py-2 px-4 bg-purple-500 text-white rounded-lg font-semibold hover:bg-purple-600 btn-action flex items-center justify-center">
+                    ✨ Generate Executive Summary Report
+                </button>
+                
+                <div class="flex space-x-3">
+                    <button onclick="approveGl('fc')" class="flex-1 py-2 px-4 bg-green-700 text-white rounded-lg font-semibold hover:bg-green-800 btn-action">
+                        <i data-lucide="award" class="w-5 h-5 inline mr-1"></i> Final Approve (Send to CFO)
+                    </button>
+                    <button onclick="rejectGl('fc')" class="flex-1 py-2 px-4 bg-yellow-700 text-white rounded-lg font-semibold hover:bg-yellow-800 btn-action">
+                        <i data-lucide="send-back" class="w-5 h-5 inline mr-1"></i> Send Back to Maker
+                    </button>
+                </div>
+            </div>
+            
+            <div id="cfoControls" class="space-y-4 hidden">
+                <h3 class="font-medium text-gray-700">CFO Action: Executive Oversight</h3>
+                 <!-- <p id="cfoFcLog" ...> (REMOVED) -->
+                <textarea id="cfoComment" rows="3" placeholder="Optional comment before final acceptance or rejection..." class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+
+                <button onclick="generateExecutiveReport(activeGlId)" class="w-full py-2 px-4 bg-purple-500 text-white rounded-lg font-semibold hover:bg-purple-600 btn-action flex items-center justify-center">
+                    ✨ Generate Executive Summary Report
+                </button>
+
+                <div class="flex space-x-3">
+                    <button onclick="approveGl('cfo')" class="flex-1 py-2 px-4 bg-indigo-700 text-white rounded-lg font-semibold hover:bg-indigo-800 btn-action">
+                        <i data-lucide="lock" class="w-5 h-5 inline mr-1"></i> Final Accept & Lock
+                    </button>
+                    <button onclick="rejectGl('cfo')" class="flex-1 py-2 px-4 bg-red-700 text-white rounded-lg font-semibold hover:bg-red-800 btn-action">
+                        <i data-lucide="x-circle" class="w-5 h-5 inline mr-1"></i> Reject (Return to FC)
+                    </button>
+                </div>
+            </div>
+
+            <button onclick="closeModal()" class="w-full mt-4 py-2 text-gray-500 hover:text-gray-700">Close</button>
+        </div>
+    </div>
+
+    <!-- Executive Report Modal (New Modal) -->
+    <div id="reportModal" class="fixed inset-0 bg-gray-900 bg-opacity-70 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 transform transition-all scale-100 opacity-100">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800 flex items-center">
+                <i data-lucide="file-text" class="w-6 h-6 mr-2 text-purple-600"></i> Executive Summary Report
+            </h2>
+            <div id="reportContent" class="report-content p-4 bg-gray-50 rounded-lg border border-gray-200 max-h-[70vh] overflow-y-auto">
+                <!-- Report content will be injected here -->
+                <p class="text-gray-500 italic">Generating report...</p>
+            </div>
+            <button onclick="document.getElementById('reportModal').classList.add('hidden')" class="w-full mt-4 py-2 text-gray-500 hover:text-gray-700">Close</button>
+        </div>
+    </div>
+    
+    <!-- Data Entry Modal (New Modal for Maker) -->
+    <div id="dataEntryModal" class="fixed inset-0 bg-gray-900 bg-opacity-70 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100 opacity-100">
+            <h2 id="dataEntryTitle" class="text-2xl font-bold mb-4 text-gray-800 flex items-center">
+                <i data-lucide="database-zap" class="w-6 h-6 mr-2 text-green-600"></i> Add/Update GL Entry
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">Enter GL details below. Using an existing GL Code will update its Balance/Description/Priority.</p>
+            
+            <form onsubmit="event.preventDefault(); handleDataEntry();" class="space-y-4">
+                <div>
+                    <label for="dataGlCode" class="block text-sm font-medium text-gray-700">GL Code (8-Digits)</label>
+                    <input type="text" id="dataGlCode" required placeholder="e.g., 11100001" maxlength="8" pattern="\d{8}" title="Must be exactly 8 digits" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="dataGlDesc" class="block text-sm font-medium text-gray-700">Description</label>
+                    <input type="text" id="dataGlDesc" required placeholder="e.g., Prepaid Expenses" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="dataBalance" class="block text-sm font-medium text-gray-700">Balance (Use '-' for Credit/Liability)</label>
+                    <input type="number" id="dataBalance" required placeholder="e.g., 150000.00 or -50000.00" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="dataPriority" class="block text-sm font-medium text-gray-700">Priority</label>
+                    <select id="dataPriority" required class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </div>
+                <button type="submit" id="dataEntrySubmitBtn" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition btn-action">
+                    Submit GL Entry
+                </button>
+            </form>
+            <button onclick="closeDataEntryModal()" class="w-full mt-4 py-2 text-gray-500 hover:text-gray-700">Cancel</button>
+        </div>
+    </div>
+
+
+    <!-- Chatbot Modal (Floating) -->
+    <div id="chatbotModal" class="fixed right-4 bottom-4 z-40 hidden flex-col w-full max-w-sm h-[85vh] md:h-[600px] bg-white rounded-xl shadow-2xl overflow-hidden transition-all duration-300">
+        <!-- Chat Header -->
+        <div class="p-4 bg-indigo-600 text-white flex justify-between items-center rounded-t-xl">
+            <h3 class="text-lg font-semibold flex items-center">
+                <i data-lucide="bot" class="w-5 h-5 mr-2"></i> Auditron AI Auditor
+            </h3>
+            <button onclick="closeChatbot()" class="p-1 rounded-full hover:bg-indigo-700 transition">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <!-- Chat History -->
+        <div id="chatHistory" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+            <!-- Messages will appear here -->
+            <div class="flex justify-start">
+                <div class="bg-indigo-100 text-indigo-800 p-3 rounded-xl rounded-bl-none max-w-[80%] shadow-sm">
+                    Hello! I'm your **Auditron AI Auditor**. I can look up GL account statuses and balances, or search for audit compliance and accounting standards (like IFRS/IND AS). You can also ask for aggregated data like: **'Show all negative entries priority sort'** or **'What is the total balance?'** How can I help?
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Input -->
+        <div class="p-4 border-t border-gray-200 bg-white">
+            <div id="chatLoading" class="text-xs text-indigo-600 mb-1 hidden">
+                <i data-lucide="loader-2" class="w-4 h-4 inline mr-1 animate-spin"></i> Thinking...
+            </div>
+            <div class="flex space-x-2">
+                <input type="text" id="chatInput" placeholder="Ask about a GL or audit rule..." class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" onkeydown="if(event.key === 'Enter') sendChatMessage()">
+                <button onclick="sendChatMessage()" class="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                    <i data-lucide="send" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Chatbot Button -->
+    <button id="chatbotButton" onclick="openChatbot()" class="fixed right-6 bottom-6 z-50 p-4 bg-indigo-500 text-white rounded-full shadow-lg hover:bg-indigo-600 transition transform hover:scale-105 hidden">
+        <i data-lucide="bot" class="w-7 h-7"></i>
+    </button>
+
+    <script>
+        // --- 1. DATA STRUCTURES & GLOBAL STATE ---
+
+        // Global State
+        let currentUser = null; // Stores { email, role } of the logged-in user
+        let isLoggedIn = false;
+        let activeGlId = null;
+        let authMode = 'login'; // 'login' or 'signup'
+
+        // Simulated User Database (Email is the key) - ONLY PRE-DEFINED ROLES
+        let userDatabase = {}; // Start empty, force signup
+
+        // Initial Trial Balance Data (Simulated Database) - UPDATED with 10 GLs
+        // MODIFIED GL 1 to start in 'Returned to Maker' state to show the Data Entry button
+        let glData = [
+            { id: 1, glCode: '11100200', glDesc: 'Capital Work in Progress', balance: 3531804.83, priority: 'Critical', threshold: 10000000, status: 'Returned to Maker', maker: 'saurin', checker: 'vikrant', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [{user: 'checker@example.com', action: 'Rejected/Queried (Returned to Maker)', comment: 'The documentation provided previously showed a balance mismatch that must be corrected.', timestamp: new Date().toLocaleString()}] },
+            { id: 2, glCode: '11100400', glDesc: 'Inventories - Stores & Spares', balance: 43873526.75, priority: 'Medium', threshold: 10000000, status: 'Pending Upload', maker: 'sagar', checker: 'harsh', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] },
+            { id: 3, glCode: '21174140', glDesc: 'Statutory Liabilities (Dr. Bal.)', balance: 150000, priority: 'Critical', threshold: 10000000, status: 'Pending Upload', maker: 'saurin', checker: 'vikrant', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // CRITICAL ALERT: Liability > 0
+            { id: 4, glCode: '31101100', glDesc: 'Long Term Borrowings', balance: -20000000.00, priority: 'High', threshold: 10000000, status: 'Pending Upload', maker: 'sagar', checker: 'harsh', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // Threshold Breached
+            { id: 5, glCode: '11641180', glDesc: 'FD - Margin Money (Asset)', balance: -100000.00, priority: 'Low', threshold: 10000000, status: 'Pending Upload', maker: 'saurin', checker: 'harsh', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // CRITICAL ALERT: Asset < 0
+            { id: 6, glCode: '11100110', glDesc: 'Inventories - Raw Material', balance: 90226167.26, priority: 'Medium', threshold: 10000000, status: 'Pending Upload', maker: 'sagar', checker: 'vikrant', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // Threshold Breached
+            { id: 7, glCode: '11314480', glDesc: 'Receivable - TDS (Asset)', balance: 4239536.70, priority: 'Low', threshold: 10000000, status: 'Pending Upload', maker: 'saurin', checker: 'harsh', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // OK
+            { id: 8, glCode: '21101650', glDesc: 'BPC - Deposit from Vendors', balance: -500000.00, priority: 'Medium', threshold: 10000000, status: 'Pending Upload', maker: 'sagar', checker: 'vikrant', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // OK
+            { id: 9, glCode: '21170510', glDesc: 'Payable - TDS (Statutory Liability)', balance: 50000.00, priority: 'Critical', threshold: 10000000, status: 'Pending Upload', maker: 'saurin', checker: 'harsh', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // CRITICAL ALERT: Liability > 0
+            { id: 10, glCode: '21190600', glDesc: 'Other Liabilities Non Current', balance: -12000000.00, priority: 'Medium', threshold: 10000000, status: 'Pending Upload', maker: 'sagar', checker: 'vikrant', fc: 'charlie', docBalance: 0, docFile: null, docFileUrl: null, log: [] }, // Threshold Breached
+        ];
+
+        // --- 2. AUTHENTICATION & APP FLOW ---
+        
+        // Helper function to extract username prefix from email (e.g., 'saurin' from 'saurin@company.com')
+        function getUserNamePrefix(email) {
+            return email ? email.substring(0, email.indexOf('@')) : '';
+        }
+
+        /**
+         * Replaces the hardcoded maker/checker/fc names in glData with the current user's prefix 
+         * if the current user is logged in as a specific role and the GL is statically assigned.
+         * This simulates dynamic assignment for the prototype.
+         */
+        function assignUserRoleBasedOnEmail() {
+            if (!currentUser) return;
+
+            const userPrefix = getUserNamePrefix(currentUser.email);
+            const userRole = currentUser.role;
+
+            glData.forEach(gl => {
+                // If user is a Maker, and the GL is statically assigned to 'saurin' or 'sagar',
+                // and the current user's prefix matches, assign it to the current user.
+                if (userRole === 'maker') {
+                    if (gl.maker === 'saurin' || gl.maker === 'sagar') {
+                        gl.maker = userPrefix;
+                    }
+                }
+                
+                // If user is a Checker, and the GL is statically assigned to 'vikrant' or 'harsh',
+                // and the current user's prefix matches, assign it to the current user.
+                if (userRole === 'checker') {
+                    if (gl.checker === 'vikrant' || gl.checker === 'harsh') {
+                        gl.checker = userPrefix;
+                    }
+                }
+
+                // If user is an FC, and the GL is statically assigned to 'charlie',
+                // and the current user's prefix matches, assign it to the current user.
+                if (userRole === 'fc' && gl.fc === 'charlie') {
+                    gl.fc = userPrefix;
+                }
+            });
+        }
+
+
+        function setAuthMessage(message, isError = true) {
+            const el = document.getElementById('authMessage');
+            if (el) {
+                el.textContent = message;
+                el.className = isError 
+                    ? 'text-red-400 font-medium mb-4' 
+                    : 'text-green-400 font-medium mb-4';
+            }
+        }
+
+        function handleLogin() {
+            const email = document.getElementById('loginEmail').value.toLowerCase();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                setAuthMessage('Please enter both email and password.');
+                return;
+            }
+
+            const user = userDatabase[email];
+
+            if (user && user.password === password) {
+                currentUser = { email: email, role: user.role };
+                isLoggedIn = true;
+                assignUserRoleBasedOnEmail(); // Assign GLs upon successful login
+                renderApp();
+            } else {
+                setAuthMessage('Invalid email or password.');
+            }
+        }
+
+        function handleSignup() {
+            const email = document.getElementById('signupEmail').value.toLowerCase();
+            const password = document.getElementById('signupPassword').value;
+            const role = document.getElementById('signupRole').value;
+
+            if (!email || !password || !role) {
+                setAuthMessage('Please fill in all fields (Email, Password, and Role).');
+                return;
+            }
+
+            if (userDatabase[email]) {
+                setAuthMessage('Account already exists for this email. Please log in.');
+                return;
+            }
+
+            // Assign the selected role
+            userDatabase[email] = { password, role };
+            setAuthMessage('Account created successfully! Please log in.', false);
+            toggleAuthMode('login');
+        }
+
+        function toggleAuthMode(mode) {
+            authMode = mode;
+            renderApp();
+        }
+
+        function logout() {
+            isLoggedIn = false;
+            currentUser = null;
+            authMode = 'login'; // Reset to login view
+            // Also close the chatbot if open
+            if (!document.getElementById('chatbotModal').classList.contains('hidden')) {
+                closeChatbot();
+            }
+            renderApp();
+        }
+
+        function renderApp() {
+            const contentDiv = document.getElementById('appContent');
+            const body = document.body;
+
+            if (isLoggedIn) {
+                contentDiv.innerHTML = renderDashboard();
+                body.classList.remove('dark-bg', 'p-0');
+                body.classList.add('bg-f7f9fc', 'p-4', 'md:p-8');
+            } else {
+                contentDiv.innerHTML = renderAuthPage();
+                body.classList.add('dark-bg', 'p-0');
+                body.classList.remove('bg-f7f9fc', 'p-4', 'md:p-8');
+            }
+            
+            // Call renderChatbot status update
+            renderChatbot();
+
+            // Initialize Lucide Icons for the new content
+            setTimeout(() => {
+                if (window.lucide) lucide.createIcons();
+            }, 50);
+        }
+
+        function renderAuthPage() {
+            return `
+                <div class="flex flex-col items-center justify-center min-h-screen dark-bg text-white p-4">
+                    <div class="mb-12 text-center">
+                        <h1 class="text-5xl font-extrabold text-indigo-400 mb-4 tracking-tight">Auditron Login</h1>
+                        <p class="text-gray-400 text-lg">${authMode === 'login' ? 'Sign in to access the workflow' : 'Create your account'}</p>
+                    </div>
+
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md">
+                        <div id="authMessage" class="text-red-400 font-medium mb-4"></div>
+                        
+                        ${authMode === 'login' ? `
+                            <!-- Login Form -->
+                            <form onsubmit="event.preventDefault(); handleLogin();">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="loginEmail" class="block text-sm font-medium text-gray-300">Email Address</label>
+                                        <input type="email" id="loginEmail" value="" placeholder="e.g., jane@company.com" required class="mt-1 block w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label for="loginPassword" class="block text-sm font-medium text-gray-300">Password</label>
+                                        <input type="password" id="loginPassword" value="" placeholder="Enter your password" required class="mt-1 block w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <button type="submit" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">
+                                        <i data-lucide="log-in" class="w-5 h-5 inline mr-2"></i> Log In
+                                    </button>
+                                </div>
+                            </form>
+                            <div class="mt-6 text-center text-gray-400">
+                                Don't have an account? 
+                                <button onclick="toggleAuthMode('signup')" class="text-indigo-400 hover:text-indigo-300 font-medium">Sign up</button>
+                            </div>
+                        ` : `
+                            <!-- Sign-up Form -->
+                            <form onsubmit="event.preventDefault(); handleSignup();">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="signupEmail" class="block text-sm font-medium text-gray-300">Email Address</label>
+                                        <input type="email" id="signupEmail" placeholder="e.g., new.user@adani.com" required class="mt-1 block w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label for="signupPassword" class="block text-sm font-medium text-gray-300">Password</label>
+                                        <input type="password" id="signupPassword" placeholder="Choose a password" required class="mt-1 block w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label for="signupRole" class="block text-sm font-medium text-gray-300">Select Role</label>
+                                        <select id="signupRole" required class="mt-1 block w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white focus:ring-indigo-500 focus:border-indigo-500">
+                                            <option value="">-- Select --</option>
+                                            <option value="maker">Maker</option>
+                                            <option value="checker">Checker</option>
+                                            <option value="fc">Finance Controller</option>
+                                            <option value="cfo">CFO</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="w-full py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition">
+                                        <i data-lucide="user-plus" class="w-5 h-5 inline mr-2"></i> Sign Up
+                                    </button>
+                                </div>
+                            </form>
+                            <div class="mt-6 text-center text-gray-400">
+                                Already have an account? 
+                                <button onclick="toggleAuthMode('login')" class="text-indigo-400 hover:text-indigo-300 font-medium">Log in</button>
+                            </div>
+                        `}
+
+                    </div>
+                    <div class="text-xs text-gray-500 mt-8 text-center">
+                        <p>Note: Please sign up first. For dynamic assignment, use email prefixes like **saurin**, **sagar** (for Maker) or **vikrant**, **harsh** (for Checker).</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- 3. CORE LOGIC FUNCTIONS ---
+
+        function getGccAlert(gl) {
+            const codePrefix = parseInt(gl.glCode.substring(0, 2));
+            const balance = gl.balance;
+            let alertText = '';
+
+            // Rule 1: Assets (1XXX) must be Positive (Debit)
+            if (codePrefix >= 10 && codePrefix < 20 && balance < 0) {
+                alertText = 'CRITICAL ALERT: Asset GL (1XXX) has a Negative/Credit Balance.';
+            }
+            // Rule 2: Liabilities (3XXX) must be Negative (Credit)
+            else if (codePrefix >= 30 && codePrefix < 40 && balance > 0) {
+                alertText = 'CRITICAL ALERT: Liability GL (3XXX) has a Positive/Debit Balance.';
+            }
+            // Rule 3: Special GLs (2XXX, typically provisions/payables) must be Negative (Credit)
+            else if (codePrefix >= 20 && codePrefix < 30 && balance > 0) {
+                alertText = 'CRITICAL ALERT: Statutory/Liability GL (2XXX) has a Positive/Debit Balance.';
+            }
+
+            // Threshold Check (Applicable to all)
+            const threshold = gl.threshold;
+            if (Math.abs(balance) > threshold) {
+                const thresholdAlert = `Threshold Breached: Balance (${formatCurrency(balance)}) exceeds predefined threshold (${formatCurrency(threshold)}).`;
+                alertText = alertText ? `${alertText} | ${thresholdAlert}` : thresholdAlert;
+            }
+
+            return alertText;
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'INR' }).format(amount);
+        }
+
+        function logAction(glId, action, comment = '') {
+            const gl = glData.find(g => g.id === glId);
+            const user = currentUser.email; // Log the email for clarity
+            const timestamp = new Date().toLocaleString();
+            const logEntry = {
+                user: user,
+                action: action,
+                comment: comment,
+                timestamp: timestamp
+            };
+            gl.log.push(logEntry);
+        }
+
+        function renderCommentHistory(gl) {
+            const historyEl = document.getElementById('commentHistory');
+            const listEl = document.getElementById('commentLogList');
+            
+            // Filter for logs that have a comment, even a default one, but not file uploads
+            const commentLogs = gl.log.filter(log => log.comment && log.comment.trim() !== '' && !log.action.includes('Uploaded Documents'));
+
+            if (commentLogs.length === 0) {
+                listEl.innerHTML = '<p class="text-gray-500 italic">No comments posted yet.</p>';
+            } else {
+                listEl.innerHTML = commentLogs.map(log => {
+                    // Determine style based on action
+                    let actionClass = 'text-gray-600';
+                    if (log.action.includes('Approved')) {
+                        actionClass = 'text-green-700';
+                    } else if (log.action.includes('Rejected') || log.action.includes('Returned') || log.action.includes('Sent Back')) {
+                        actionClass = 'text-red-700';
+                    }
+
+                    return `
+                        <div class="pb-2 border-b border-gray-200 last:border-b-0">
+                            <p class="font-medium text-gray-800">${log.user}</p>
+                            <p class="text-xs ${actionClass} font-semibold">${log.action}</p>
+                            <p class="mt-1 text-gray-700">${log.comment}</p>
+                            <p class="text-xs text-gray-400 text-right">${log.timestamp}</p>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            historyEl.classList.remove('hidden');
+        }
+
+        // --- 4. DASHBOARD RENDERING (Accesses role and assignment) ---
+
+        function renderDashboard() {
+            const role = currentUser.role;
+            const userName = getUserNamePrefix(currentUser.email);
+            
+            // Global Header
+            let html = `
+                <!-- Global Header -->
+                <header class="mb-8 p-4 bg-white rounded-xl shadow-lg flex justify-between items-center sticky top-0 z-10">
+                    <h1 class="text-3xl font-bold text-gray-800 flex items-center">
+                        <i data-lucide="shield-check" class="w-7 h-7 mr-2 text-indigo-600"></i> Auditron
+                    </h1>
+                    <div class="flex items-center space-x-4">
+                        <div id="currentUserName" class="text-gray-600 text-lg font-medium">${userName.charAt(0).toUpperCase() + userName.slice(1)} (${currentUser.role})</div>
+                        <button onclick="logout()" class="py-2 px-4 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition text-sm">
+                            <i data-lucide="log-out" class="w-4 h-4 inline mr-1"></i> Logout
+                        </button>
+                    </div>
+                </header>
+            `;
+
+            switch (role) {
+                case 'maker':
+                    html += renderMakerDashboard();
+                    break;
+                case 'checker':
+                    html += renderCheckerDashboard();
+                    break;
+                case 'fc':
+                    html += renderFcDashboard();
+                    break;
+                case 'cfo':
+                    html += renderCfoDashboard();
+                    break;
+            }
+            return html;
+        }
+        
+        // --- Dashboard Role-Specific Render Functions ---
+
+        function renderMakerDashboard() {
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            // Filter GLs assigned to this specific maker
+            const assignedGls = glData.filter(gl => gl.maker === userRoleName); 
+            const pendingUpload = assignedGls.filter(gl => gl.status === 'Pending Upload' || gl.status === 'Returned to Maker');
+            
+            // CHECK for the condition to show the data entry button
+            const requiresDataCorrection = assignedGls.some(gl => gl.status === 'Returned to Maker');
+
+            return `
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-semibold text-gray-700">Maker Dashboard: My GL Accounts</h2>
+                    ${requiresDataCorrection ? `
+                        <button onclick="openDataEntryModal()" class="py-2 px-4 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition text-sm flex items-center shadow-md">
+                            <i data-lucide="plus-circle" class="w-4 h-4 inline mr-1"></i> Add/Update GL Entry
+                        </button>
+                    ` : ''}
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div class="dashboard-card border-l-4 border-indigo-500">
+                        <p class="text-lg font-medium text-gray-500">Action Required</p>
+                        <p class="text-3xl font-bold text-indigo-700">${pendingUpload.length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-green-500">
+                        <p class="text-lg font-medium text-gray-500">In Review (Checker/FC/CFO)</p>
+                        <p class="text-3xl font-bold text-green-700">${assignedGls.filter(gl => gl.status.includes('Pending') || gl.status.includes('Returned to FC')).length - pendingUpload.length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-gray-500">
+                        <p class="text-lg font-medium text-gray-500">Total Assigned GLs</p>
+                        <p class="text-3xl font-bold text-gray-700">${assignedGls.length}</p>
+                    </div>
+                </div>
+
+                <div class="dashboard-card">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">GL Review Status</h3>
+                    ${renderGlTable(assignedGls)}
+                </div>
+            `;
+        }
+
+        function renderCheckerDashboard() {
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            // Filter GLs assigned to this specific checker where status is 'Pending Checker Review'.
+            const reviewQueue = glData.filter(gl => gl.status === 'Pending Checker Review' && gl.checker === userRoleName); 
+
+            return `
+                <h2 class="text-2xl font-semibold text-gray-700 mb-6">Checker Dashboard: Review Queue</h2>
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="dashboard-card border-l-4 border-yellow-500">
+                        <p class="text-lg font-medium text-gray-500">GLs Ready for Validation</p>
+                        <p class="text-3xl font-bold text-yellow-700">${reviewQueue.length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-green-500">
+                        <p class="text-lg font-medium text-gray-500">Reviewed & Approved</p>
+                        <p class="text-3xl font-bold text-green-700">${glData.filter(gl => gl.checker === userRoleName && (gl.status.includes('FC Approval') || gl.status.includes('CFO Review'))).length}</p>
+                    </div>
+                </div>
+                <div class="dashboard-card">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">GLs Requiring Review</h3>
+                    ${renderGlTable(reviewQueue)}
+                </div>
+            `;
+        }
+
+        function renderFcDashboard() {
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            // GLs needing FC action: either pending checker approval OR returned from CFO
+            const fcActionQueue = glData.filter(gl => 
+                (gl.status === 'Pending FC Approval' && gl.fc === userRoleName) ||
+                (gl.status === 'Returned to FC' && gl.fc === userRoleName)
+            );
+            
+            const criticalAlerts = fcActionQueue.filter(gl => getGccAlert(gl).includes('CRITICAL ALERT')).length;
+
+            return `
+                <h2 class="text-2xl font-semibold text-gray-700 mb-6">FC Dashboard: Approval Queue & Exception Monitor</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div class="dashboard-card border-l-4 border-indigo-700">
+                        <p class="text-lg font-medium text-gray-500">Ready for Final Sign-off</p>
+                        <p class="text-3xl font-bold text-indigo-800">${fcActionQueue.length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-red-500 ${criticalAlerts > 0 ? 'alert-critical' : ''}">
+                        <p class="text-lg font-medium text-gray-500">Critical Alerts</p>
+                        <p class="text-3xl font-bold text-red-700">${criticalAlerts}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-gray-500">
+                        <p class="text-lg font-medium text-gray-500">Total Approved GLs</p>
+                        <p class="text-3xl font-bold text-gray-700">${glData.filter(gl => gl.status === 'Final Approved/Locked').length}</p>
+                    </div>
+                </div>
+                <div class="dashboard-card">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">GLs Requiring Approval (with Alerts)</h3>
+                    ${renderGlTable(fcActionQueue)}
+                </div>
+            `;
+        }
+
+        function renderCfoDashboard() {
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            // Filter GLs needing CFO action
+            const approvalQueue = glData.filter(gl => gl.status === 'Pending CFO Review'); 
+            
+            const criticalViolations = glData.filter(gl => getGccAlert(gl).includes('CRITICAL ALERT')).length;
+
+            return `
+                <h2 class="text-2xl font-semibold text-gray-700 mb-6">CFO Dashboard: Executive Summary & Risk Monitor</h2>
+                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div class="dashboard-card border-l-4 border-green-500">
+                        <p class="text-lg font-medium text-gray-500">Total GLs Final Accepted</p>
+                        <p class="text-3xl font-bold text-green-700">${glData.filter(gl => gl.status === 'Final Approved/Locked').length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-red-500">
+                        <p class="text-lg font-medium text-gray-500">GLs Pending Final Approval</p>
+                        <p class="text-3xl font-bold text-red-700">${approvalQueue.length}</p>
+                    </div>
+                    <div class="dashboard-card border-l-4 border-gray-500">
+                        <p class="text-lg font-medium text-gray-500">Overall GL Integrity</p>
+                        <p class="text-3xl font-bold text-gray-700">${(criticalViolations === 0 && glData.length > 0) ? 'PASS' : 'FAIL'}</p>
+                    </div>
+                </div>
+                <div class="dashboard-card">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">GLs Requiring Executive Final Approval</h3>
+                    ${renderGlTable(approvalQueue)}
+                </div>
+                
+                <div class="dashboard-card mt-6">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Risk Overview: All GLs (Read-only)</h3>
+                    ${renderGlTable(glData, true, false)}
+                </div>
+            `;
+        }
+
+        function renderGlTable(gls, showAlerts = false, clickable = true) {
+            if (gls.length === 0) {
+                return '<p class="text-gray-500">No GL accounts found in this queue.</p>';
+            }
+            
+            const role = currentUser ? currentUser.role : '';
+            const isCfoOverview = !clickable && role === 'cfo';
+
+            let rows = gls.map(gl => {
+                const alertText = getGccAlert(gl);
+                const isCritical = alertText.includes('CRITICAL ALERT');
+                const isLocked = gl.status === 'Final Approved/Locked';
+                
+                let rowClass = '';
+                if (clickable && !isLocked) {
+                    rowClass = 'gl-table-row';
+                }
+                
+                // Color status for visibility
+                let statusClass = 'bg-gray-200 text-gray-800';
+                if (gl.status === 'Pending Upload' || gl.status === 'Returned to Maker') statusClass = 'bg-red-100 text-red-800';
+                else if (gl.status === 'Pending Checker Review') statusClass = 'bg-yellow-100 text-yellow-800';
+                else if (gl.status === 'Pending FC Approval' || gl.status === 'Returned to FC') statusClass = 'bg-orange-100 text-orange-800';
+                else if (gl.status === 'Pending CFO Review') statusClass = 'bg-purple-100 text-purple-800';
+                else if (gl.status === 'Final Approved/Locked') statusClass = 'bg-green-100 text-green-800';
+
+
+                return `
+                    <tr class="${rowClass} border-b border-gray-100 ${isCritical ? 'bg-red-50' : ''}" onclick="${clickable && !isLocked ? `openModal(${gl.id})` : ''}">
+                        <td class="px-4 py-3 text-sm font-mono">${gl.glCode}</td>
+                        <td class="px-4 py-3 text-sm">${gl.glDesc}</td>
+                        <td class="px-4 py-3 text-sm font-semibold">${formatCurrency(gl.balance)}</td>
+                        <td class="px-4 py-3 text-xs">
+                            <span class="inline-block px-2 py-1 leading-none rounded-full ${
+                                gl.priority === 'Critical' ? 'bg-red-100 text-red-800' :
+                                gl.priority === 'High' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'
+                            }">${gl.priority}</span>
+                        </td>
+                        <td class="px-4 py-3 text-sm">
+                            <span class="inline-flex items-center px-2 py-1 leading-none rounded-full text-xs font-medium ${statusClass}">
+                                ${gl.status}
+                                ${gl.status === 'Returned to Maker' ? '<i data-lucide="alert-triangle" class="w-4 h-4 ml-1 text-yellow-500"></i>' : ''}
+                                ${gl.status === 'Returned to FC' ? '<i data-lucide="corner-down-left" class="w-4 h-4 ml-1 text-red-500"></i>' : ''}
+                                ${gl.status === 'Final Approved/Locked' ? '<i data-lucide="lock" class="w-4 h-4 ml-1 text-green-500"></i>' : ''}
+                            </span>
+                        </td>
+                        ${(showAlerts || role === 'fc' || isCfoOverview) ? `<td class="px-4 py-3 text-xs text-red-600 font-medium">${alertText || 'None'}</td>` : ''}
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GL Code</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                ${(showAlerts || role === 'fc' || isCfoOverview) ? '<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Compliance/Threshold Alert</th>' : ''}
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${rows}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="mt-4 text-xs text-gray-500">${clickable ? 'Click on a row to take action.' : 'Read-only log.'}</p>
+            `;
+        }
+
+        // --- 5. MODAL/ACTION HANDLING ---
+        
+        // Helper to find GL by code
+        function findGlByCode(glCode) {
+            return glData.find(g => g.glCode === glCode);
+        }
+
+        function openDataEntryModal() {
+            const modal = document.getElementById('dataEntryModal');
+            document.getElementById('dataGlCode').value = '';
+            document.getElementById('dataGlDesc').value = '';
+            document.getElementById('dataBalance').value = '';
+            document.getElementById('dataPriority').value = 'Low';
+            document.getElementById('dataEntryTitle').textContent = 'Add New GL Entry';
+            document.getElementById('dataEntrySubmitBtn').textContent = 'Submit GL Entry';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // Re-create lucide icons
+            setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
+
+        }
+
+        function closeDataEntryModal() {
+            document.getElementById('dataEntryModal').classList.add('hidden');
+            document.getElementById('dataEntryModal').classList.remove('flex');
+        }
+
+        function handleDataEntry() {
+            const glCode = document.getElementById('dataGlCode').value.trim();
+            const glDesc = document.getElementById('dataGlDesc').value.trim();
+            const balance = parseFloat(document.getElementById('dataBalance').value);
+            const priority = document.getElementById('dataPriority').value;
+            
+            if (glCode.length !== 8 || isNaN(balance)) {
+                console.error("Invalid GL Code or Balance.");
+                return;
+            }
+
+            const existingGl = findGlByCode(glCode);
+            const userPrefix = getUserNamePrefix(currentUser.email);
+            const actionUser = currentUser.email;
+            const logTimestamp = new Date().toLocaleString();
+
+            if (existingGl) {
+                // Update existing GL
+                existingGl.glDesc = glDesc;
+                existingGl.balance = balance;
+                existingGl.priority = priority;
+                existingGl.status = 'Pending Upload'; // Reset status after manual correction
+                
+                // Add log entry
+                existingGl.log.push({
+                    user: actionUser,
+                    action: 'GL Data Updated',
+                    comment: `Updated Balance to ${formatCurrency(balance)} and Description. Status reset to Pending Upload.`,
+                    timestamp: logTimestamp
+                });
+                console.log(`GL ${glCode} updated.`);
+
+            } else {
+                // Add new GL
+                const newGl = {
+                    id: Date.now(), // Unique ID
+                    glCode: glCode,
+                    glDesc: glDesc,
+                    balance: balance,
+                    priority: priority,
+                    threshold: 10000000, // Default threshold
+                    status: 'Pending Upload',
+                    maker: userPrefix, 
+                    checker: 'vikrant', // ASSIGNED TO VIKRANT FOR FLOW
+                    fc: 'charlie', // ASSIGNED TO CHARLIE FOR FLOW
+                    docBalance: 0, 
+                    docFile: null, 
+                    docFileUrl: null, 
+                    log: [{
+                        user: actionUser,
+                        action: 'GL Entry Added',
+                        comment: 'New GL entry added by Maker.',
+                        timestamp: logTimestamp
+                    }]
+                };
+                glData.push(newGl);
+                console.log(`New GL ${glCode} added.`);
+            }
+
+            closeDataEntryModal();
+            renderApp(); // Rerender dashboard to show changes
+        }
+
+        function openModal(glId) {
+            activeGlId = glId;
+            const gl = glData.find(g => g.id === glId);
+            const role = currentUser.role;
+
+            // Check for locked file state
+            if (gl.status === 'Final Approved/Locked') {
+                console.warn(`GL ${gl.glCode} is locked and cannot be edited.`);
+                document.getElementById('modalTitle').textContent = 'GL Details (LOCKED)';
+                // Display only read-only details if locked
+                document.getElementById('makerControls').classList.add('hidden');
+                document.getElementById('checkerControls').classList.add('hidden');
+                document.getElementById('fcControls').classList.add('hidden');
+                document.getElementById('cfoControls').classList.add('hidden');
+                document.getElementById('makerClarificationDraft').classList.add('hidden'); // Ensure hidden
+                document.getElementById('actionModal').classList.remove('hidden');
+                document.getElementById('actionModal').classList.add('flex');
+                return;
+            }
+
+            // Set basic details
+            document.getElementById('modalTitle').textContent = `${role === 'maker' ? 'GL Upload' : role === 'checker' ? 'GL Validation' : role === 'fc' ? 'GL Approval' : 'GL Final Sign-off'} for Account`;
+            document.getElementById('modalGlCode').textContent = gl.glCode;
+            document.getElementById('modalGlDesc').textContent = gl.glDesc;
+            document.getElementById('modalGlBalance').textContent = formatCurrency(gl.balance);
+            document.getElementById('modalGlPriority').textContent = gl.priority;
+            document.getElementById('modalGlStatus').textContent = gl.status;
+
+            // Render comment history for all roles if it's not a brand new item
+            if (gl.log.length > 0) {
+                renderCommentHistory(gl);
+            }
+
+            // Hide all controls and special info divs first
+            document.getElementById('makerControls').classList.add('hidden');
+            document.getElementById('checkerControls').classList.add('hidden');
+            document.getElementById('fcControls').classList.add('hidden');
+            document.getElementById('cfoControls').classList.add('hidden');
+            document.getElementById('modalFcAlert').classList.add('hidden');
+            document.getElementById('reviewerDocInfo').classList.add('hidden');
+            document.getElementById('commentHistory').classList.add('hidden'); // Ensure it's hidden by default
+            document.getElementById('makerClarificationDraft').classList.add('hidden'); // Hide clarification draft by default
+
+            // Show relevant controls
+            if (role === 'maker' && (gl.status === 'Pending Upload' || gl.status === 'Returned to Maker')) {
+                document.getElementById('makerControls').classList.remove('hidden');
+                document.getElementById('docBalance').value = gl.docBalance;
+                
+                // Show Clarification Draft area only if returned
+                if (gl.status === 'Returned to Maker') {
+                    document.getElementById('makerClarificationDraft').classList.remove('hidden');
+                    // Find the last comment from a Checker/FC
+                    const lastQuery = gl.log.filter(l => l.action.includes('Rejected') || l.action.includes('Queried') || l.action.includes('Sent Back')).pop();
+                    if (lastQuery) {
+                         document.getElementById('makerClarificationText').placeholder = `Responding to query from ${lastQuery.user} on ${lastQuery.timestamp}...`;
+                    } else {
+                         document.getElementById('makerClarificationText').placeholder = 'Draft your detailed clarification and explanation here...';
+                    }
+
+                } else {
+                    document.getElementById('makerClarificationText').value = ''; // Clear text if not returned
+                }
+
+            } else if (role === 'checker' && gl.status === 'Pending Checker Review') {
+                document.getElementById('checkerControls').classList.remove('hidden');
+                showReviewerDocInfo(gl); // Show file info
+                const docMatch = gl.docBalance.toFixed(2) === gl.balance.toFixed(2);
+                document.getElementById('checkerDocStatus').innerHTML = `
+                    Supporting Doc Balance: <span class="font-bold">${formatCurrency(gl.docBalance)}</span>.
+                    <span class="p-1 rounded text-xs font-semibold ${docMatch ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                        ${docMatch ? 'MATCHES GL BALANCE' : 'MISMATCH ALERT'}
+                    </span>
+                `;
+            } else if (role === 'fc' && (gl.status === 'Pending FC Approval' || gl.status === 'Returned to FC')) {
+                document.getElementById('fcControls').classList.remove('hidden');
+                showReviewerDocInfo(gl); // Show file info
+                const alertText = getGccAlert(gl);
+                if (alertText) {
+                    document.getElementById('modalFcAlert').textContent = alertText;
+                    document.getElementById('modalFcAlert').classList.remove('hidden');
+                }
+                
+                // Show Send Back to Maker only if status is FC Approval (not on return from CFO)
+                const sendBackBtn = document.querySelector('#fcControls button:last-child');
+                sendBackBtn.classList.toggle('hidden', gl.status === 'Returned to FC');
+                
+            } else if (role === 'cfo' && gl.status === 'Pending CFO Review') {
+                document.getElementById('cfoControls').classList.remove('hidden');
+                showReviewerDocInfo(gl); // Show file info
+                
+            } else {
+                // If user role can't act on this status, show read-only info
+                document.getElementById('modalTitle').textContent = 'GL Details (Read Only)';
+                if (gl.status !== 'Pending Upload') { // Don't show doc info if nothing's happened yet
+                     showReviewerDocInfo(gl); // Show file info for read-only
+                }
+            }
+
+            // Render comment history for all roles if it's not a brand new item
+            if (gl.log.length > 0) {
+                renderCommentHistory(gl);
+            }
+
+            document.getElementById('actionModal').classList.remove('hidden');
+            document.getElementById('actionModal').classList.add('flex');
+            // Re-create icons in case they were dynamically added/removed
+            setTimeout(() => {
+                if (window.lucide) lucide.createIcons();
+            }, 50);
+        }
+
+        // Helper function to show document info to reviewers
+        function showReviewerDocInfo(gl) {
+            const docInfoEl = document.getElementById('reviewerDocInfo');
+            const docInfoTextEl = document.getElementById('docInfoText');
+            if (gl.docFileUrl && gl.docFile) {
+                docInfoTextEl.innerHTML = `
+                    ${gl.docFile} 
+                    <a href="${gl.docFileUrl}" 
+                       download="${gl.docFile}"
+                       class="ml-2 text-indigo-600 hover:underline text-sm font-medium"
+                       title="Download ${gl.docFile}">
+                       [Download File]
+                    </a>`;
+            } else {
+                docInfoTextEl.textContent = 'No document uploaded by Maker.';
+            }
+            docInfoEl.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('actionModal').classList.add('hidden');
+            document.getElementById('actionModal').classList.remove('flex');
+            activeGlId = null;
+        }
+
+        function submitDocuments() {
+            const gl = glData.find(g => g.id === activeGlId);
+            const docBalance = parseFloat(document.getElementById('docBalance').value);
+            const docFile = document.getElementById('supportingDoc').files[0];
+            const clarificationText = document.getElementById('makerClarificationText').value.trim();
+
+            if (isNaN(docBalance)) {
+                console.error("Please enter a valid document balance.");
+                return;
+            }
+            
+            // Only enforce clarification text if it was returned by a checker/FC
+            if (gl.status === 'Returned to Maker' && !clarificationText) {
+                 if (!confirm("This GL was returned for query/rejection. Are you sure you want to resubmit without a written clarification?")) {
+                    return;
+                }
+            }
+
+
+            if (!docFile && gl.status !== 'Returned to Maker' && !gl.docFile) {
+                console.warn("No file uploaded.");
+                // You might want to enforce file upload here
+            }
+
+            // If a new file is uploaded, update the name and create a new Object URL
+            if (docFile) {
+                // Revoke old URL if it exists, to free up memory
+                if (gl.docFileUrl) {
+                    URL.revokeObjectURL(gl.docFileUrl);
+                }
+                gl.docFile = docFile.name;
+                gl.docFileUrl = URL.createObjectURL(docFile);
+            }
+
+            gl.docBalance = docBalance;
+            gl.status = 'Pending Checker Review';
+            
+            // Log the clarification note as the comment for resubmission
+            const logComment = clarificationText || `File: ${gl.docFile || 'N/A'}, Balance: ${formatCurrency(docBalance)}`;
+            logAction(activeGlId, 'Resubmitted for Review', logComment);
+
+            console.log(`GL ${gl.glCode} submitted for Checker Review.`);
+            closeModal();
+            renderApp();
+        }
+
+        function approveGl(role) {
+            const gl = glData.find(g => g.id === activeGlId);
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            let action = '';
+            let comment = '';
+            let newStatus = gl.status;
+
+            if (role === 'checker') {
+                newStatus = 'Pending FC Approval';
+                comment = document.getElementById('checkerComment').value || 'Approved without comment.';
+                action = 'Approved (Forwarded to FC)';
+            } else if (role === 'fc') {
+                // FC sends to CFO
+                newStatus = 'Pending CFO Review';
+                comment = document.getElementById('fcComment').value || 'Final sign-off complete. Forwarding to CFO.';
+                action = 'Approved (Forwarded to CFO)';
+            } else if (role === 'cfo') {
+                // CFO accepts and locks
+                newStatus = 'Final Approved/Locked';
+                comment = document.getElementById('cfoComment').value || 'Final acceptance and process lock.';
+                action = 'Final Accepted & Locked';
+            }
+
+            gl.status = newStatus;
+            const logUser = role === 'checker' ? userRoleName : getUserNamePrefix(currentUser.email);
+            logAction(activeGlId, action, comment, logUser); 
+
+            console.log(`GL ${gl.glCode} status updated to ${gl.status}.`);
+            closeModal();
+            renderApp();
+        }
+
+        function rejectGl(role) {
+            const gl = glData.find(g => g.id === activeGlId);
+            const userRoleName = getUserNamePrefix(currentUser.email);
+            let comment = '';
+            let action = '';
+            let newStatus = gl.status;
+
+            if (role === 'checker') {
+                comment = document.getElementById('checkerComment').value;
+                if (!comment) {
+                    console.error("Comment is mandatory when rejecting/querying.");
+                    return;
+                }
+                newStatus = 'Returned to Maker';
+                action = 'Rejected/Queried (Returned to Maker)';
+            } else if (role === 'fc') {
+                // FC sends back to Maker
+                comment = document.getElementById('fcComment').value || 'Returned to Maker for clarification.';
+                newStatus = 'Returned to Maker'; 
+                action = 'Sent Back to Maker';
+            } else if (role === 'cfo') {
+                // CFO sends back to FC
+                comment = document.getElementById('cfoComment').value || 'Rejected, returned to FC for review.';
+                newStatus = 'Returned to FC';
+                action = 'Rejected (Returned to FC)';
+            }
+            
+            gl.status = newStatus;
+            const logUser = role === 'checker' ? userRoleName : getUserNamePrefix(currentUser.email);
+            logAction(activeGlId, action, comment, logUser); 
+
+            console.log(`GL ${gl.glCode} status updated to ${gl.status}. Reason: ${comment}`);
+            closeModal();
+            renderApp();
+        }
+
+
+        // --- 6. CHATBOT LOGIC (AI AUDITOR) ---
+
+        const API_KEY = ""; // Using empty string for Canvas auto-injection
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+        const CHATBOT_SYSTEM_PROMPT = "You are the Auditron AI Auditor, a professional financial assistant. Your role is to provide precise, accurate, and concise answers to user queries regarding GL accounts, audit compliance (like IFRS, IND AS), or general finance questions. Use Google Search grounding for external knowledge. For GL data lookups, confirm the GL code and provide the current balance and status from the internal context provided by the user. Keep your tone professional and helpful.";
+        const REPORT_SYSTEM_PROMPT = "You are a Senior Financial Analyst tasked with writing a concise, executive summary report for a Chief Financial Officer (CFO). Analyze the provided GL account data and the associated compliance/threshold alerts. Structure your output clearly with a focus on risk and next steps. ONLY provide the report content, formatted with clear headings, bullet points, and strong emphasis where required. DO NOT include any conversational introduction, conclusion, or markdown code blocks.";
+        const MAKER_CLARIFICATION_PROMPT = "You are a professional financial assistant drafting a formal clarification note for an internal review team (Checker/FC). Your goal is to draft a clear, professional note for a GL item that was sent back. The note should address the discrepancy (mismatch or query) and explain how the Maker is resolving it. Use the tone of a diligent financial professional. ONLY output the raw, formatted text of the note. Do not include any conversational intro/outro or markdown code blocks. Keep the note brief (3-5 sentences).";
+
+
+        function openChatbot() {
+            document.getElementById('chatbotModal').classList.remove('hidden');
+            document.getElementById('chatbotModal').classList.add('flex');
+            document.getElementById('chatbotButton').classList.add('hidden');
+            // Re-create lucide icons for modal content
+            setTimeout(() => {
+                if (window.lucide) lucide.createIcons();
+            }, 50);
+        }
+
+        function closeChatbot() {
+            document.getElementById('chatbotModal').classList.add('hidden');
+            document.getElementById('chatbotModal').classList.remove('flex');
+            document.getElementById('chatbotButton').classList.remove('hidden');
+        }
+
+        /**
+         * Checks the query against internal glData.
+         */
+        function checkInternalGlData(query) {
+            const lowerQuery = query.toLowerCase();
+
+            // 1. Single GL Code Lookup (Original Logic)
+            const glCodeMatch = query.match(/(\d{8})/);
+            if (glCodeMatch) {
+                const glCode = glCodeMatch[1];
+                const gl = glData.find(g => g.glCode === glCode);
+                
+                if (gl) {
+                    const balance = formatCurrency(gl.balance);
+                    const status = gl.status;
+                    const maker = gl.maker;
+                    const checker = gl.checker;
+                    const fc = gl.fc;
+                    
+                    const response = `**Internal GL Data Lookup:**<br><br>- **GL Code:** ${glCode} - ${gl.glDesc}<br>- **Balance:** ${balance}<br>- **Current Status:** ${status}<br>- **Responsible Team:** Maker: *${maker}*, Checker: *${checker}*, FC: *${fc}*.<br><br>This information is directly from the Trial Balance data in Auditron.`;
+                    return { isInternal: true, response: response };
+                }
+            }
+
+            // 2. Aggregated Queries 
+
+            // Total Balance
+            if (lowerQuery.includes('total balance') || lowerQuery.includes('total of all gls')) {
+                const totalBalance = glData.reduce((sum, gl) => sum + gl.balance, 0);
+                const formattedTotal = formatCurrency(totalBalance);
+                const response = `The **Total Aggregate Balance** for all ${glData.length} GL accounts is **${formattedTotal}**.`;
+                return { isInternal: true, response: response };
+            }
+
+            // Negative Balances (Sorted by Priority)
+            if (lowerQuery.includes('negative entries') && (lowerQuery.includes('sort') || lowerQuery.includes('priority'))) {
+                let negativeGls = glData.filter(gl => gl.balance < 0);
+                
+                if (negativeGls.length === 0) {
+                    return { isInternal: true, response: "There are no negative (Credit) entries to display or sort." };
+                }
+
+                // Custom sorting function: Critical > High > Medium > Low
+                const priorityOrder = { 'Critical': 1, 'High': 2, 'Medium': 3, 'Low': 4 };
+
+                negativeGls.sort((a, b) => {
+                    return priorityOrder[a.priority] - priorityOrder[b.priority];
+                });
+                
+                let response = `Found **${negativeGls.length} negative entries (Credit Balances), sorted by Priority:**<br><ul>`;
+                negativeGls.forEach(gl => {
+                    response += `<li>**${gl.glCode}** (Priority: ${gl.priority}): ${formatCurrency(gl.balance)}</li>`;
+                });
+                response += "</ul>";
+                return { isInternal: true, response: response };
+            }
+            
+            // Negative Balances (Unsorted)
+            if (lowerQuery.includes('negative balances') || lowerQuery.includes('credit entries')) {
+                const negativeGls = glData.filter(gl => gl.balance < 0);
+                if (negativeGls.length === 0) {
+                    return { isInternal: true, response: "There are currently **no GL accounts** with a negative (Credit) balance in the system." };
+                }
+                
+                let response = `Found **${negativeGls.length} negative entries (Credit Balances):**<br><ul>`;
+                negativeGls.forEach(gl => {
+                    response += `<li>**${gl.glCode}** (${gl.glDesc}): ${formatCurrency(gl.balance)}</li>`;
+                });
+                response += "</ul>";
+                return { isInternal: true, response: response };
+            }
+            
+            // Positive Balances (Sorted by Priority)
+            if (lowerQuery.includes('positive entries') && (lowerQuery.includes('sort') || lowerQuery.includes('priority'))) {
+                let positiveGls = glData.filter(gl => gl.balance >= 0);
+                
+                if (positiveGls.length === 0) {
+                    return { isInternal: true, response: "There are no positive (Debit) entries to display or sort." };
+                }
+
+                // Custom sorting function: Critical > High > Medium > Low
+                const priorityOrder = { 'Critical': 1, 'High': 2, 'Medium': 3, 'Low': 4 };
+
+                positiveGls.sort((a, b) => {
+                    return priorityOrder[a.priority] - priorityOrder[b.priority];
+                });
+                
+                let response = `Found **${positiveGls.length} positive entries (Debit Balances), sorted by Priority:**<br><ul>`;
+                positiveGls.forEach(gl => {
+                    response += `<li>**${gl.glCode}** (Priority: ${gl.priority}): ${formatCurrency(gl.balance)}</li>`;
+                });
+                response += "</ul>";
+                return { isInternal: true, response: response };
+            }
+
+            // Positive Balances (Unsorted)
+            if (lowerQuery.includes('positive balances') || lowerQuery.includes('debit entries')) {
+                const positiveGls = glData.filter(gl => gl.balance >= 0);
+                if (positiveGls.length === 0) {
+                    return { isInternal: true, response: "There are currently **no GL accounts** with a positive (Debit) balance in the system." };
+                }
+                
+                let response = `Found **${positiveGls.length} positive entries (Debit Balances):**<br><ul>`;
+                positiveGls.forEach(gl => {
+                    response += `<li>**${gl.glCode}** (${gl.glDesc}): ${formatCurrency(gl.balance)}</li>`;
+                });
+                response += "</ul>";
+                return { isInternal: true, response: response };
+            }
+
+            if (lowerQuery.includes('pending checker review') || lowerQuery.includes('ready for checker')) {
+                const pendingChecker = glData.filter(gl => gl.status === 'Pending Checker Review');
+                if (pendingChecker.length === 0) {
+                    return { isInternal: true, response: "There are currently **no GL accounts** pending review by a Checker." };
+                }
+                
+                let response = `Found **${pendingChecker.length} GL accounts pending Checker Review:**<br><ul>`;
+                pendingChecker.forEach(gl => {
+                    response += `<li>**${gl.glCode}** (${gl.glDesc}) - Maker: *${gl.maker}*</li>`;
+                });
+                response += "</ul>";
+                return { isInternal: true, response: response };
+            }
+
+
+            // 3. Vague internal request (Original Logic)
+            const internalKeywords = ['status', 'balance', 'gl data', 'my accounts', 'assigned gls', 'gl code', 'entries', 'list'];
+            const isVagueInternalRequest = internalKeywords.some(keyword => lowerQuery.includes(keyword));
+
+            if (isVagueInternalRequest) {
+                 const response = "I found keywords related to internal GL data. Please specify if you want a **single GL code** lookup (e.g., 'Status of 11100200'), or a **summary query** (e.g., 'Show all negative balances').";
+                 return { isInternal: true, response: response };
+            }
+
+            return { isInternal: false };
+        }
+
+        function appendMessage(sender, message) {
+            const history = document.getElementById('chatHistory');
+            const userClass = 'justify-end';
+            const botClass = 'justify-start';
+            const msgClass = sender === 'user' 
+                ? 'bg-indigo-600 text-white rounded-xl rounded-br-none'
+                : 'bg-indigo-100 text-indigo-800 rounded-xl rounded-bl-none';
+
+            const messageHtml = `
+                <div class="flex ${sender === 'user' ? userClass : botClass}">
+                    <div class="p-3 max-w-[80%] shadow-sm ${msgClass}">
+                        ${message}
+                    </div>
+                </div>
+            `;
+            
+            history.innerHTML += messageHtml;
+            history.scrollTop = history.scrollHeight;
+        }
+
+        function formatChatResponse(text, sources) {
+            let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Basic bolding for markdown
+            formattedText = formattedText.replace(/\n/g, '<br>');
+
+            if (sources && sources.length > 0) {
+                const sourceList = sources.map((s, index) => 
+                    `<li><a href="${s.uri}" target="_blank" class="text-xs text-indigo-500 hover:text-indigo-700">${s.title || 'Source ' + (index + 1)}</a></li>`
+                ).join('');
+                formattedText += `<div class="mt-3 pt-2 border-t border-indigo-200 text-xs text-gray-600"><strong>Sources:</strong> <ul class="list-disc list-inside pl-0">${sourceList}</ul></div>`;
+            }
+            return formattedText;
+        }
+
+        /**
+         * Generic Gemini API Call handler for both Chatbot and Reporting
+         */
+        async function runGeminiCall(userQuery, systemPrompt) {
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: systemPrompt === CHATBOT_SYSTEM_PROMPT ? [{ "google_search": {} }] : undefined,
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+            
+            let responseData = null;
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (attempts < maxAttempts) {
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    responseData = result;
+                    break; // Success, exit loop
+
+                } catch (error) {
+                    console.error('API call failed:', error);
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        const delay = Math.pow(2, attempts) * 1000; // Exponential backoff
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        throw new Error('API call failed after multiple retries.');
+                    }
+                }
+            }
+            return responseData;
+        }
+
+        async function handleGeminiApiCall(userQuery) {
+            const loadingEl = document.getElementById('chatLoading');
+            loadingEl.classList.remove('hidden');
+
+            try {
+                const responseData = await runGeminiCall(userQuery, CHATBOT_SYSTEM_PROMPT);
+                
+                if (!responseData || !responseData.candidates || responseData.candidates.length === 0) {
+                    return formatChatResponse("Sorry, I could not process that request. Please try again.", []);
+                }
+
+                const candidate = responseData.candidates[0];
+                const text = candidate.content?.parts?.[0]?.text || "I received a response but the text content was empty.";
+                
+                let sources = [];
+                const groundingMetadata = candidate.groundingMetadata;
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    sources = groundingMetadata.groundingAttributions
+                        .map(attribution => ({
+                            uri: attribution.web?.uri,
+                            title: attribution.web?.title,
+                        }))
+                        .filter(source => source.uri && source.title);
+                }
+
+                return formatChatResponse(text, sources);
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                return formatChatResponse("I'm sorry, an error occurred while connecting to the AI service. Please check your network connection or try a different query.", []);
+            } finally {
+                 loadingEl.classList.add('hidden');
+            }
+        }
+
+        async function sendChatMessage() {
+            const inputEl = document.getElementById('chatInput');
+            const userQuery = inputEl.value.trim();
+
+            if (!userQuery) return;
+
+            // 1. Append User Message
+            appendMessage('user', userQuery);
+            inputEl.value = ''; // Clear input immediately
+
+            // 2. Check for internal data query
+            const internalResult = checkInternalGlData(userQuery);
+            
+            let botResponseHtml;
+
+            if (internalResult.isInternal) {
+                // Respond directly from internal data
+                botResponseHtml = internalResult.response;
+            } else {
+                // 3. Fallback to Gemini API call
+                botResponseHtml = await handleGeminiApiCall(userQuery);
+            }
+
+            // 4. Append Bot Message
+            appendMessage('bot', botResponseHtml);
+        }
+
+        // --- LLM Feature 1: Executive Report Generation (FC/CFO) ---
+        async function generateExecutiveReport(glId) {
+            const gl = glData.find(g => g.id === glId);
+            if (!gl) return;
+
+            // Show report modal with loading state
+            const reportModal = document.getElementById('reportModal');
+            const reportContentEl = document.getElementById('reportContent');
+            reportContentEl.innerHTML = `<p class="text-indigo-600 font-semibold flex items-center justify-center">
+                <i data-lucide="loader-2" class="w-5 h-5 animate-spin mr-2"></i> Generating Executive Summary...
+            </p>`;
+            reportModal.classList.remove('hidden');
+            reportModal.classList.add('flex');
+            
+            // Re-create lucide icons for report modal content
+            setTimeout(() => {
+                if (window.lucide) lucide.createIcons();
+            }, 50);
+
+            const alertText = getGccAlert(gl);
+            const docMatchStatus = gl.docBalance.toFixed(2) === gl.balance.toFixed(2) ? 'Matches GL Balance' : 'MISMATCH ALERT';
+            const recentLogs = gl.log.slice(-3).map(l => `${l.user} (${l.action})`).join('; ') || 'No recent log history.';
+
+            const reportPrompt = `
+                GL Account Details:
+                - GL Code: ${gl.glCode}
+                - Description: ${gl.glDesc}
+                - Current Balance: ${formatCurrency(gl.balance)}
+                - GL Classification Priority: ${gl.priority}
+                - Current Workflow Status: ${gl.status}
+                - Document Balance Provided: ${formatCurrency(gl.docBalance)} (Match Status: ${docMatchStatus})
+                - Compliance/Risk Alerts: ${alertText || 'None'}
+                - Last 3 Actions: ${recentLogs}
+
+                Goal: Write a formal, single-page Executive Report focusing on Key Findings, Risk Assessment, and Final Recommendation for the CFO.
+            `;
+            
+            try {
+                const responseData = await runGeminiCall(reportPrompt, REPORT_SYSTEM_PROMPT);
+                
+                if (!responseData || !responseData.candidates || responseData.candidates.length === 0) {
+                    reportContentEl.innerHTML = '<p class="text-red-600 font-semibold">Error: Could not generate report content.</p>';
+                    return;
+                }
+
+                const reportText = responseData.candidates[0].content?.parts?.[0]?.text || "Report generation failed. Please try again.";
+                
+                // Format the output (converting markdown headers/bolding to HTML structure for display)
+                let formattedReport = reportText
+                    .replace(/### (.*)/g, '<!-- $1 -->') // Remove subheadings
+                    .replace(/## (.*)/g, '<h4 class="text-lg font-bold mt-4 mb-2 text-gray-700">$1</h4>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/- (.*)/g, '<li class="ml-4 list-disc">$1</li>')
+                    .replace(/\n/g, '<br>');
+
+                // Wrapping lists in ul tags
+                formattedReport = formattedReport.replace(/<br><li/g, '<ul><li');
+                formattedReport = formattedReport.replace(/<\/li><br>/g, '</li></ul>');
+                
+                reportContentEl.innerHTML = `
+                    <div class="text-sm">
+                        <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                        <p><strong>Account:</strong> ${gl.glCode} - ${gl.glDesc}</p>
+                        <p><strong>FC/CFO:</strong> ${currentUser.email}</p>
+                        <hr class="my-3"/>
+                        ${formattedReport}
+                    </div>
+                `;
+
+            } catch (error) {
+                 reportContentEl.innerHTML = `<p class="text-red-600 font-semibold">LLM Call Error: ${error.message}. Please check connection.</p>`;
+            }
+        }
+
+        // --- LLM Feature 2: Maker Clarification Draft ---
+        async function draftMakerClarification(glId) {
+            const gl = glData.find(g => g.id === glId);
+            if (!gl) return;
+
+            const makerClarificationTextarea = document.getElementById('makerClarificationText');
+            makerClarificationTextarea.value = "Generating draft note...";
+            
+            // Find the rejection/query comment
+            const lastQuery = gl.log.filter(l => l.action.includes('Rejected') || l.action.includes('Queried') || l.action.includes('Sent Back')).pop();
+            const lastQueryComment = lastQuery ? lastQuery.comment : 'A general discrepancy or documentation issue was flagged.';
+            const isMatch = gl.docBalance.toFixed(2) === gl.balance.toFixed(2);
+            const docMatchStatus = isMatch ? 'Match Confirmed' : 'Mismatch Present';
+
+            const draftPrompt = `
+                - GL Code: ${gl.glCode}
+                - GL Balance: ${formatCurrency(gl.balance)}
+                - Doc Balance: ${formatCurrency(gl.docBalance)}
+                - Document Match Status: ${docMatchStatus}
+                - Checker's Query/Reason for Return: "${lastQueryComment}"
+                - Assume the Maker is submitting a correction/clarification that resolves the query. 
+                
+                Draft a note for the Maker to put in the clarification box before resubmitting.
+            `;
+            
+            try {
+                const responseData = await runGeminiCall(draftPrompt, MAKER_CLARIFICATION_PROMPT);
+                
+                if (!responseData || !responseData.candidates || responseData.candidates.length === 0) {
+                    makerClarificationTextarea.value = 'Error: Could not draft clarification note. Please write manually.';
+                    return;
+                }
+
+                const draftedText = responseData.candidates[0].content?.parts?.[0]?.text || "Draft generation failed.";
+                
+                // Set the drafted text into the textarea for the Maker to edit
+                makerClarificationTextarea.value = draftedText.trim();
+
+            } catch (error) {
+                 makerClarificationTextarea.value = `LLM Call Error: Failed to generate draft due to connection issue. Please write manually.`;
+            }
+        }
+
+
+        function renderChatbot() {
+            // Only show the floating button if logged in
+            if (isLoggedIn) {
+                document.getElementById('chatbotButton').classList.remove('hidden');
+            } else {
+                document.getElementById('chatbotButton').classList.add('hidden');
+            }
+        }
+
+        // --- 7. INITIALIZATION (Updated) ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initial render starts on the auth page
+            renderApp();
+        });
+
+    </script>
+</body>
+</html>
